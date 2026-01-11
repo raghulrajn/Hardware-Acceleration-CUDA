@@ -1,5 +1,6 @@
 # Hardware-Acceleration-CUDA
 
+## Matrix multiplications
 ![profile](Utils/gpu_profile.png)
 
 ## Furthest Point sampling
