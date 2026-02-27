@@ -3,6 +3,35 @@
 #include<math.h>
 #include <cuda_runtime.h>
 
+#define MAX_KERNEL_SIZE 5
+
+__constant__ float d_kernel_const[MAX_KERNEL_SIZE];
+
+__global__
+void conv1d_constant_kernel(const float* input,
+                   float* output,
+                   int n,
+                   int k,
+                   int padding,
+                   int output_size)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i >= output_size) return;
+
+    float sum = 0.0f;
+
+    for (int j = 0; j < k; j++) {
+        int input_index = i - padding + j;
+
+        if (input_index >= 0 && input_index < n) {
+            sum += input[input_index] * d_kernel_const[j];
+        }
+    }
+
+    output[i] = sum;
+}
+
 __global__
 void conv1d_kernel(const float* input,
                    const float* kernel,
@@ -66,7 +95,7 @@ int main(){
     std::vector<float> out = conv_1d(input, kernel);
 
     for(auto i:out)
-    std::cout<< i<< "\t";
+    std::cout<< i<< " ";
 
     int n = 7;
     int k = 5;
@@ -77,30 +106,48 @@ int main(){
 
     int output_size = (n + 2*padding - k) + 1;
 
-    float *d_input, *d_kernel, *d_output;
+    float *d_input, *d_kernel, *d_output, *d_output1;
 
     cudaMalloc(&d_input,  n * sizeof(float));
     cudaMalloc(&d_kernel, k * sizeof(float));
     cudaMalloc(&d_output, output_size * sizeof(float));
+    cudaMalloc(&d_output1, output_size * sizeof(float));
 
     cudaMemcpy(d_input,  h_input,  n * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, h_kernel, k * sizeof(float), cudaMemcpyHostToDevice);
 
+    cudaMemcpyToSymbol(d_kernel_const, h_kernel, k * sizeof(float));
+
     int threads = 256;
     int blocks = (output_size + threads - 1) / threads;
 
-    conv1d_kernel<<<blocks, threads>>>(
-        d_input, d_kernel, d_output,
-        n, k, padding, output_size);
+
+    conv1d_kernel<<<blocks, threads>>>(d_input, d_kernel, d_output, n, k, padding, output_size);
 
     float h_output[3];
     cudaMemcpy(h_output, d_output,
                output_size * sizeof(float),
                cudaMemcpyDeviceToHost);
+    
+    std::cout<<"\n";
+    for (int i = 0; i < output_size; i++)
+        std::cout << h_output[i] << " ";
+    
+    std::cout<<"\n";
+    conv1d_constant_kernel<<<blocks, threads>>>(
+                    d_input,
+                    d_output1,
+                    n,
+                    k,
+                    padding,
+                    output_size
+                );
+
+    cudaMemcpy(h_output, d_output1,output_size * sizeof(float),cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < output_size; i++)
         std::cout << h_output[i] << " ";
-
+    std::cout<<"\n";
     cudaFree(d_input);
     cudaFree(d_kernel);
     cudaFree(d_output);
