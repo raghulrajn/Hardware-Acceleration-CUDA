@@ -1,3 +1,4 @@
+//https://github.com/KarnbirKhera/MLSys2026-9Week-LearningPlan/ - Learning repo
 #include <iostream>
 
 // (Warp Divergence) Threads are executed in groups of 32 called warps. 
@@ -104,7 +105,7 @@ __global__ void reduced_sum_sequential_shfl_down(float* input, float* output, in
 }
 
 int main() {
-   const int N         = 1024*1024;
+    const int N         = 1024;
     const int blockSize = 256;
     const int gridSize  = (N + blockSize - 1) / blockSize;
     const size_t size   = N * sizeof(float);
