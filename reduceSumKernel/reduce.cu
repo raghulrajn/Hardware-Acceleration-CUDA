@@ -53,7 +53,9 @@ __global__ void reduced_sum_sequential(float* input, float* output, int n){
 
     __syncthreads();
 
-    // localId < stride ensures that all active threads are perfectly contiguous (e.g., threads 0 through 255 are active, while 256 through 512 are idle). Entire warps are either fully active or fully idle, meaning zero branch divergence within a warp.
+    // localId < stride ensures that all active threads are perfectly contiguous 
+    //(e.g., threads 0 through 255 are active, while 256 through 512 are idle). 
+    //Entire warps are either fully active or fully idle, meaning zero branch divergence within a warp.
     for(int stride = blockDim.x/2; stride > 0; stride >>= 1) {
         if(localId < stride) {
             sharedMem[localId] += sharedMem[localId + stride];
@@ -66,8 +68,43 @@ __global__ void reduced_sum_sequential(float* input, float* output, int n){
     }
 }
 
+__global__ void reduced_sum_sequential_shfl_down(float* input, float* output, int n) {
+    
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int localId = threadIdx.x;
+
+    extern __shared__ float sharedMemory[];
+
+    if(id < n) {
+        sharedMemory[localId] = input[id];
+    } else {
+        sharedMemory[localId] = 0;
+    }
+    __syncthreads();
+
+
+    for(int stride = blockDim.x/2; stride >= 32; stride >>= 1) {
+        if(localId < stride) {
+            sharedMemory[localId] += sharedMemory[localId + stride];
+        }
+        __syncthreads();
+    }
+
+    if(localId < 32) {
+        float sum = sharedMemory[localId];
+        for(int offset = 16; offset > 0; offset >>= 1){
+            //0xFFFFFFFF means all threads in the warp participate
+            sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
+        }
+        if(localId == 0) {
+            output[blockIdx.x] = sum;
+        }
+    }
+
+}
+
 int main() {
-   const int N         = 1024;
+   const int N         = 1024*1024;
     const int blockSize = 256;
     const int gridSize  = (N + blockSize - 1) / blockSize;
     const size_t size   = N * sizeof(float);
@@ -90,20 +127,30 @@ int main() {
     auto verify = [&](const char* name) {
         cudaDeviceSynchronize();
         cudaMemcpy(h_partial, d_output, gridSize * sizeof(float), cudaMemcpyDeviceToHost);
-
         float gpu_sum = 0.0f;
         for (int i = 0; i < gridSize; i++) {
-            std::cout<<h_partial[i]<<"\t";
+            // std::cout<<h_partial[i]<<"\t";
             gpu_sum += h_partial[i];
         }
-        printf("\n\n\n");
+        printf("\n");
         printf("%s: %s\n", name, (fabsf(gpu_sum - cpu_sum) < 1.0f) ? "CORRECT" : "INCORRECT");
-        printf("\n\n\n");
+        printf("\n");
         cudaMemset(d_output, 0, gridSize * sizeof(float));
     };
 
     reduced_sum_naive<<<gridSize, blockSize, sharedMem>>>(d_input, d_output, N);
     verify("reduced_sum_naive");
+
+    reduced_sum_sequential<<<gridSize, blockSize, sharedMem>>>(d_input, d_output, N);
+    verify("reduced_sum_sequential");
+
+    reduced_sum_sequential_shfl_down<<<gridSize, blockSize, sharedMem>>>(d_input, d_output, N);
+    verify("reduced_sum_sequential_shfl_down");
+
+    free(h_input);
+    free(h_partial);
+    cudaFree(d_input);
+    cudaFree(d_output);
 
     return 0;
 }
